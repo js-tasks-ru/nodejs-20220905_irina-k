@@ -14,23 +14,25 @@ server.on('request', (req, res) => {
 
   switch (req.method) {
     case 'GET':
-      try {
-        const lastIndex = url.pathname.lastIndexOf('/');
-        if (lastIndex !== 0) {
-          res.statusCode = 400;
-          res.end('Incorrect path');
+      const lastIndex = url.pathname.lastIndexOf('/');
+      if (lastIndex !== 0) {
+        res.statusCode = 400;
+        res.end('Incorrect path');
+        return;
+      }
+      if (!fs.existsSync(filepath)) {
+        res.statusCode = 404;
+        res.end('No file');
+        return;
+      } else {
+        const stream = fs.createReadStream(filepath);
+        stream.pipe(res);
+        stream.on('error', (error) => {
+          console.log(error);
+          res.statusCode = 500;
+          res.end('Strange error');
           return;
-        }
-        if (!fs.existsSync(filepath)) {
-          res.statusCode = 404;
-          res.end('No file');
-          return;
-        } else {
-          fs.createReadStream(filepath).pipe(res);
-        }
-      } catch (error) {
-        res.statusCode = 500;
-        res.end('Strange error');
+        });
       }
       break;
     default:
