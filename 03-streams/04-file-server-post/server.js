@@ -42,7 +42,7 @@ server.on('request', async (req, res) => {
       req.pipe(limitedStream).pipe(writeStream);
 
       limitedStream.on('error', (error) => {
-        if (error.code === 'LimitExceededError') {
+        if (error.code === 'LIMIT_EXCEEDED') {
           fsPromises.unlink(filepath);
           res.statusCode = 413;
           res.end();
@@ -57,6 +57,7 @@ server.on('request', async (req, res) => {
 
       req.on('close', () => {
         if (req.readableAborted) {
+          fsPromises.unlink(filepath);
           req.unpipe();
           res.end();
           return;
