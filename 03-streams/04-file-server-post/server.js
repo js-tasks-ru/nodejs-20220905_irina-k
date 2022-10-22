@@ -1,12 +1,13 @@
-const url = require('url');
 const http = require('http');
 const path = require('path');
 const fs = require('fs');
+const fsPromises = fs.promises;
+
 const LimitSizeStream = require('./LimitSizeStream');
 
 const server = new http.Server();
 
-server.on('request', (req, res) => {
+server.on('request', async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host}`);
   const pathname = url.pathname.slice(1);
 
@@ -14,64 +15,64 @@ server.on('request', (req, res) => {
 
   switch (req.method) {
     case 'POST':
-      /** Проверка на правильность маршрута. */
       const lastIndex = url.pathname.lastIndexOf('/');
       if (lastIndex !== 0) {
         res.statusCode = 400;
         res.end('Incorrect path');
         return;
       }
+      try {
+        await fsPromises.access(filepath, fs.constants.R_OK);
+        res.statusCode = 409;
+        res.end();
+        return;
+      } catch (error) {
+        console.log(error);
+      }
 
-      fs.open(filepath, 'wx', (err) => {
-        if (err) {
-          /** Проверка наличия файла. */
-          if (err.code === 'EEXIST') {
-            res.statusCode = 409;
-            res.end('The file exists');
-            return;
-          }
-          throw err;
-        } else {
-          /** Если файла не существует, то стараемся создать его. */
-          req.on('data', function(chunk) {
-            const limitedStream = new LimitSizeStream({ limit: 1024, encoding: 'utf-8' }).on('error', (error) => {
-              if (error) {
-                if (error.code === 'LIMIT_EXCEEDED') {
-                  res.statusCode = 413;
-                  /** Удаляем файл. */
-                  fs.unlink(filepath, (error) => {
-                    if (error) {
-                      console.log(error);
-                    }
-                  });
-                }
-              }
-            });
-            limitedStream.write(chunk.toString(), 'utf-8', (error) => {
-              console.log(error);
-            });
-          });
+      const createCommonError = () => {
+        res.statusCode = 500;
+        res.end();
+        return;
+      };
 
-          req.on('error', function(error) {
-            if (error) {
-              console.log('error');
-              res.end('Error');
-              return;
-            }
-          });
+      const writeStream = fs.createWriteStream(filepath);
+      const limitedStream = new LimitSizeStream( {limit: 1048576} );
 
-          req.on('close', function() {
-            console.log('close');
-            res.end('Closed');
-            return;
-          });
+      req.pipe(limitedStream).pipe(writeStream);
 
-          req.on('finish', function() {
-            res.statusCode = 201;
-            res.end('Finished');
-          });
+      limitedStream.on('error', (error) => {
+        if (error.code === 'LimitExceededError') {
+          fsPromises.unlink(filepath);
+          res.statusCode = 413;
+          res.end();
+          return;
+        }
+        createCommonError();
+      });
+
+      req.on('error', () => {
+        createCommonError();
+      });
+
+      req.on('close', () => {
+        if (req.readableAborted) {
+          req.unpipe();
+          res.end();
+          return;
         }
       });
+
+      writeStream.on('error', () => {
+        createCommonError();
+      });
+
+      writeStream.on('finish', () => {
+        res.statusCode = 201;
+        res.end('Your file was created');
+        return;
+      });
+
       break;
 
     default:
